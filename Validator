@@ -1,0 +1,113 @@
+FULLNODE :
+
+## Cai dat cac goi can thiet
+sudo apt update && sudo apt upgrade -y
+sudo apt install curl build-essential git wget jq make gcc tmux -y
+
+## Cai dat git remote helper cua Gitopia
+curl https://get.gitopia.com | bash
+
+## Cai dat GO version 1.18.1
+## Neu chay lenh go version va hien thi ket qua thi bo qua phan nay
+wget https://golang.org/dl/go1.18.1.linux-amd64.tar.gz; \
+rm -rv /usr/local/go; \
+tar -C /usr/local -xzf go1.18.1.linux-amd64.tar.gz && \
+rm -v go1.18.1.linux-amd64.tar.gz && \
+echo "export PATH=$PATH:/usr/local/go/bin:$HOME/go/bin" >> ~/.bash_profile && \
+source ~/.bash_profile && \
+go version
+
+## Cai dat binary file
+cd ~ && git clone gitopia://gitopia1dlpc7ps63kj5v0kn5v8eq9sn2n8v8r5z9jmwff/gitopia
+cd gitopia && make install
+
+## Kiem tra version va duong dan cai dat
+gitopiad version
+which gitopiad 
+
+## Download genesis files
+cd ~ && git clone gitopia://gitopia1dlpc7ps63kj5v0kn5v8eq9sn2n8v8r5z9jmwff/testnets
+
+## Cai dat Fullnode Gitopia
+GITOPIA_CHAIN_ID="gitopia-janus-testnet"
+GITOPIA_MONIKER="YOUR_NODE_NAME"
+
+cd ~ && gitopiad config chain-id gitopia-janus-testnet
+gitopia init --chain-id "$GITOPIA_CHAIN_ID" "$GITOPIA_MONIKER"
+
+## Copy va Kiem tra genesis
+cp ~/testnets/gitopia-janus-testnet/genesis.json $HOME/.gitopia/config/
+gitopiad validate-genesis
+
+## Set 1 vai tham so
+sed -i 's|^minimum-gas-prices *=.*|minimum-gas-prices = "0.0001utlore"|g' $HOME/.gitopia/config/app.toml
+sed -i 's|pruning = "default"|pruning = "custom"|g' $HOME/.gitopia/config/app.toml
+sed -i 's|pruning-keep-recent = "0"|pruning-keep-recent = "100"|g' $HOME/.gitopia/config/app.toml
+sed -i 's|pruning-interval = "0"|pruning-interval = "10"|g' $HOME/.gitopia/config/app.toml
+
+## Update seed/peers. 
+## Hien tai chua co thong tin, de trong
+peers=""
+sed -i.bak -e "s/^persistent_peers *=.*/persistent_peers = \"$peers\"/" $HOME/.gitopia/config/config.toml
+
+seeds=""
+sed -i.bak -e "s/^seeds =.*/seeds = \"$seeds\"/" $HOME/.gitopia/config/config.toml
+
+## Tao systemd service
+sudo tee /etc/systemd/system/gitopiad.service > /dev/null <<EOF
+[Unit]
+Description=gitopia
+After=network-online.target
+
+[Service]
+User=$USER
+ExecStart=$(which gitopiad) start
+Restart=on-failure
+RestartSec=3
+LimitNOFILE=65535
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+sudo systemctl daemon-reload && sudo systemctl enable gitopiad 
+sudo systemctl restart gitopiad 
+sudo journalctl -u gitopiad -f -o cat
+
+
+## Kiem tra trang thai sync
+gitopiad status 2>&1 | jq .SyncInfo
+
+## Tao vi moi
+GITOPIA_WALLET="YOUR_WALLET_NAME"
+gitopiad keys add $GITOPIA_WALLET
+
+# Khoi phuc lai vi cu (chi chay neu can)
+GITOPIA_WALLET="YOUR_WALLET_NAME"
+gitopiad keys add $GITOPIA_WALLET --recover
+
+# Vao discord xin faucet
+# Kiem tra balance vi
+gitopiad query bank balances $(gitopiad keys show $GITOPIA_WALLET -a)
+
+TẠO VALIDATOR :
+
+gitopiad tx staking create-validator \
+--chain-id gitopia-janus-testnet \
+--commission-rate=0.1 \
+--commission-max-rate=0.2 \
+--commission-max-change-rate=0.1 \
+--min-self-delegation="1" \
+--amount=1000000tlore \
+--pubkey $(gitopiad tendermint show-validator) \
+--moniker $GITOPIA_MONIKER \
+--from=$GITOPIA_WALLET \
+--gas="auto" \
+--fees 555tlore
+
+ĐỔI PORT NẾU XUNG ĐỘT :26656 , 26657 , 26658 ,26660 , 6060 , 9090 , 9091
+
+## Doi port dc to mau do
+sed -i.bak -e "s%^proxy_app = \"tcp://127.0.0.1:26658\"%proxy_app = \"tcp://127.0.0.1:26658\"%; s%^laddr = \"tcp://127.0.0.1:26657\"%laddr = \"tcp://127.0.0.1:26657\"%; s%^pprof_laddr = \"localhost:6060\"%pprof_laddr = \"localhost:6060\"%; s%^laddr = \"tcp://0.0.0.0:26656\"%laddr = \"tcp://0.0.0.0:26656\"%; s%^prometheus_listen_addr = \":26660\"%prometheus_listen_addr = \":26660\"%" $HOME/.gitopia/config/config.toml
+sed -i.bak -e "s%^address = \"0.0.0.0:9090\"%address = \"0.0.0.0:9090\"%; s%^address = \"0.0.0.0:9091\"%address = \"0.0.0.0:9091\"%" $HOME/.gitopia/config/app.toml
+sed -i.bak -e "s%^node = \"tcp://localhost:26657\"%node = \"tcp://localhost:26657\"%" $HOME/.gitopia/config/client.toml
